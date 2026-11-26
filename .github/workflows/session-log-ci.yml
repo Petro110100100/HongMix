@@ -1,0 +1,79 @@
+# Fork-only CI for the session-log branch (not part of the upstream change): builds HongMix on GitHub's
+# Apple Silicon runner and runs Hong's own checks plus the session log tests.
+name: Session log CI
+
+on:
+  push:
+    branches: [session-log, "session-log-*"]
+  workflow_dispatch:
+
+jobs:
+  build-test:
+    runs-on: macos-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "Toolchain (newest Xcode, HongMix needs the macOS 26 SDK)"
+        run: |
+          ls -d /Applications/Xcode*.app
+          X=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1); sudo xcode-select -s "$X"
+          sw_vers; uname -m; xcode-select -p; xcrun --show-sdk-path; swiftc --version
+          sysctl -n machdep.cpu.brand_string; df -h ~
+
+      - name: Dependencies
+        run: brew install srt pkgconf ffmpeg
+
+      - name: English UI check (scripts/check-i18n.py)
+        if: success() || failure()
+        run: python3 -I scripts/check-i18n.py
+
+      - name: Session log unit test (tests/sessionlog/run.sh)
+        if: success() || failure()
+        run: bash tests/sessionlog/run.sh
+
+      - name: Core test (scripts/test-core.sh)
+        if: success() || failure()
+        run: bash scripts/test-core.sh
+
+      - name: Split test (tests/split_test.sh)
+        if: success() || failure()
+        run: bash tests/split_test.sh
+
+      - name: Build app (scripts/build-cli.sh release)
+        if: success() || failure()
+        run: |
+          bash scripts/build-cli.sh release || { cat build/logs/errors.txt; tail -150 build/logs/cli-build.log; exit 1; }
+          ls -la build/cli/HongMix.app/Contents/MacOS
+
+      - name: App cut test 29.97 (tests/sessionlog/app-cut-test.sh)
+        if: success() || failure()
+        run: bash tests/sessionlog/app-cut-test.sh 1080p2997
+
+      - name: App cut test 25
+        if: success() || failure()
+        run: bash tests/sessionlog/app-cut-test.sh 1080p25
+
+      - name: App cut test 59.94
+        if: success() || failure()
+        run: bash tests/sessionlog/app-cut-test.sh 1080p5994
+
+      - name: Collect session files
+        if: always()
+        run: |
+          mkdir -p build/logs/sessions
+          for f in 1080p2997 1080p25 1080p5994; do
+            d="${TMPDIR:-/tmp}/hm-cut-$f"; [ -d "$d" ] || continue
+            mkdir -p "build/logs/sessions/$f"
+            cp "$d"/*.log "$d"/*.json "$d"/*.fcpxml "$d"/*.edl "$d"/*.txt "build/logs/sessions/$f/" 2>/dev/null || true
+          done
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: |
+            build/logs/
+            ${{ runner.temp }}/hongmix-*/**/*.log
+          if-no-files-found: ignore
