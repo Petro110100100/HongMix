@@ -2069,5 +2069,5 @@
  "녹화 로그에 기록: %@": "Written to recording log: %@",
  "컷 리스트": "Cut list",
  "녹화하는 동안 모든 전환 기록": "Log every switch while recording",
- "녹화가 끝나면 녹화 폴더에 HongMix_<날짜_시간>.session.json을 씁니다: 프레임 단위 컷, 마커, 녹화 파일. 편집 프로그램에서 컷을 다시 만들 때 씁니다.": "When recording stops, writes HongMix_<date_time>.session.json to the recording folder: frame-exact cuts, markers and the recorded files. Use it to rebuild the cut in an editor."
+ "녹화가 끝나면 녹화 폴더에 HongMix_<날짜_시간>.session.json(프레임 단위 컷, 마커, 녹화 파일)과 편집 프로그램용 .fcpxml / .edl 타임라인을 씁니다.": "When recording stops, writes HongMix_<date_time>.session.json (frame-exact cuts, markers, recorded files) and .fcpxml / .edl timelines for editors to the recording folder."
 }

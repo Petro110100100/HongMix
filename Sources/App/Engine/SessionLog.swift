@@ -11,7 +11,8 @@ import Foundation
 //   • With "Cut list" on (MultiCorder settings, off by default) every program change, transition, overlay,
 //     fade to black, marker, recorder file and render stall is appended to <name>.session.journal as it
 //     happens (one JSON object per line — survives a crash), and <name>.session.json is written when the
-//     session closes: format, inputs, recorder files with their first frames, events and the shot list.
+//     session closes: format, inputs, recorder files with their first frames, events and the shot list,
+//     plus <name>.fcpxml (Final Cut Pro, Resolve) and <name>.edl (CMX3600, up to 30 fps) of the live cut.
 //
 // Positions are render ticks: renderTick pushes every recorder with the same tick, and the C recorder
 // stamps each frame as tick − (tick of its first frame), so a tick maps to a time in every file
@@ -298,6 +299,126 @@ enum SessionCutList {
     }
 }
 
+// MARK: - Editor files (session file → FCPXML / EDL)
+
+enum SessionEditorFiles {
+    /// FCPXML 1.10 (Final Cut Pro, DaVinci Resolve): one timeline, a clip per shot from the ISO files (the
+    /// program file where an input has no ISO file), a gap where neither exists, markers on the clips.
+    /// Times are exact multiples of the frame duration at every rate (1001/30000s …).
+    static func fcpxml(_ doc: SessionDocument, name: String) -> String {
+        let num = Int64(doc.format.fpsNum), den = Int64(doc.format.fpsDen)
+        func t(_ frames: Int64) -> String {
+            if frames == 0 { return "0s" }
+            let n = frames * den, g = gcd(n, num)
+            return num / g == 1 ? "\(n / g)s" : "\(n / g)/\(num / g)s"
+        }
+        var used: [String] = []
+        for sh in doc.shots { if let f = sh.file, !used.contains(f) { used.append(f) } }
+        var assetID: [String: String] = [:]
+        var x = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE fcpxml>\n<fcpxml version=\"1.10\">\n  <resources>\n"
+        x += "    <format id=\"r1\" frameDuration=\"\(t(1))\" width=\"\(doc.format.width)\" height=\"\(doc.format.height)\"/>\n"
+        for (i, path) in used.enumerated() {
+            let id = "r\(i + 2)"
+            assetID[path] = id
+            let f = doc.files.first { $0.path == path }
+            let dur = max(1, (f?.endFrame ?? doc.durationFrames) - (f?.firstFrame ?? 0))
+            let title = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
+            x += "    <asset id=\"\(id)\" name=\"\(esc(title))\" start=\"0s\" duration=\"\(t(dur))\" hasVideo=\"1\" hasAudio=\"1\""
+            x += " format=\"r1\" audioSources=\"1\" audioChannels=\"2\" audioRate=\"48000\">\n"
+            x += "      <media-rep kind=\"original-media\" src=\"\(esc(URL(fileURLWithPath: path).absoluteString))\"/>\n    </asset>\n"
+        }
+        x += "  </resources>\n  <library>\n    <event name=\"\(esc(name))\">\n      <project name=\"\(esc(name))\">\n"
+        x += "        <sequence format=\"r1\" duration=\"\(t(doc.durationFrames))\" tcStart=\"0s\" tcFormat=\"NDF\" audioLayout=\"stereo\" audioRate=\"48k\">\n"
+        x += "          <spine>\n"
+        let markers = doc.events.filter { $0.type == "marker" }
+        var pos: Int64 = 0
+        for sh in doc.shots {
+            if sh.start > pos {   // no program state before the first shot (should not happen) → gap
+                x += "            <gap name=\"Gap\" offset=\"\(t(pos))\" start=\"0s\" duration=\"\(t(sh.start - pos))\"/>\n"
+            }
+            let len = sh.end - sh.start
+            let local = sh.file != nil ? (sh.fileFrame ?? 0) : 0
+            let ms = markers.filter { $0.frame >= sh.start && $0.frame < sh.end }
+                .map { "              <marker start=\"\(t(local + $0.frame - sh.start))\" duration=\"\(t(1))\" value=\"\(esc(($0.text ?? "").isEmpty ? "Marker" : $0.text!))\"/>\n" }
+                .joined()
+            if let f = sh.file, let id = assetID[f] {
+                x += "            <asset-clip ref=\"\(id)\" offset=\"\(t(sh.start))\" start=\"\(t(local))\" duration=\"\(t(len))\""
+                x += " name=\"\(esc(sh.name ?? "Input \(sh.number ?? 0)"))\" format=\"r1\" tcFormat=\"NDF\""
+                x += ms.isEmpty ? "/>\n" : ">\n" + ms + "            </asset-clip>\n"
+            } else {
+                x += "            <gap name=\"\(esc(sh.name ?? "Gap"))\" offset=\"\(t(sh.start))\" start=\"0s\" duration=\"\(t(len))\""
+                x += ms.isEmpty ? "/>\n" : ">\n" + ms + "            </gap>\n"
+            }
+            pos = sh.end
+        }
+        x += "          </spine>\n        </sequence>\n      </project>\n    </event>\n  </library>\n</fcpxml>\n"
+        return x
+    }
+
+    /// CMX3600 EDL (Premiere and others): one event per shot that has a file, reel = input name (8 chars),
+    /// clip name and path as comments, markers as LOC lines. Non-drop-frame frame counts (29.97 counts
+    /// 30 per second). nil above 30 fps: CMX3600 timecode has no standard form there.
+    static func edl(_ doc: SessionDocument, name: String) -> String? {
+        let fps = Double(doc.format.fpsNum) / Double(doc.format.fpsDen)
+        guard fps <= 30.5 else { return nil }
+        let base = Int64(fps.rounded())
+        func tc(_ frames: Int64) -> String {
+            let f = max(0, frames)
+            return String(format: "%02lld:%02lld:%02lld:%02lld", f / (base * 3600), (f / (base * 60)) % 60, (f / base) % 60, f % base)
+        }
+        let recStart = base * 3600   // record timecode starts at 01:00:00:00
+        var out = "TITLE: \(name)\nFCM: NON-DROP FRAME\n\n"
+        var n = 0
+        let markers = doc.events.filter { $0.type == "marker" }
+        for sh in doc.shots {
+            guard let file = sh.file, let ff = sh.fileFrame else { continue }
+            n += 1
+            let len = sh.end - sh.start
+            out += String(format: "%03d  %@ %@ C        %@ %@ %@ %@\n", n, pad(reel(sh.name), 8), pad("AA/V", 5),
+                          tc(ff), tc(ff + len), tc(recStart + sh.start), tc(recStart + sh.end))
+            out += "* FROM CLIP NAME: \((file as NSString).lastPathComponent)\n"
+            out += "* SOURCE FILE: \(file)\n"
+            for m in markers where m.frame >= sh.start && m.frame < sh.end {
+                let text = (m.text ?? "").replacingOccurrences(of: "\n", with: " ")
+                out += "* LOC: \(tc(recStart + m.frame)) BLUE    \(text.isEmpty ? "Marker" : text)\n"
+            }
+            out += "\n"
+        }
+        return out
+    }
+
+    /// EDL reel: letters, digits and _ only, upper case, at most 8 characters ("AX" when nothing is left).
+    static func reel(_ name: String?) -> String {
+        let ok = (name ?? "").uppercased().unicodeScalars.map {
+            CharacterSet.alphanumerics.contains($0) && $0.isASCII ? Character($0) : "_"
+        }
+        var collapsed = ""
+        for c in ok where !(c == "_" && collapsed.last == "_") { collapsed.append(c) }
+        let r = String(collapsed.trimmingCharacters(in: CharacterSet(charactersIn: "_")).prefix(8))
+        return r.isEmpty ? "AX" : r
+    }
+
+    private static func pad(_ s: String, _ n: Int) -> String { s.count >= n ? s : s + String(repeating: " ", count: n - s.count) }
+
+    private static func gcd(_ a: Int64, _ b: Int64) -> Int64 { b == 0 ? max(1, abs(a)) : gcd(b, a % b) }
+
+    static func esc(_ s: String) -> String {
+        var o = ""
+        for c in s {
+            switch c {
+            case "&": o += "&amp;"
+            case "<": o += "&lt;"
+            case ">": o += "&gt;"
+            case "\"": o += "&quot;"
+            case "'": o += "&apos;"
+            case "\n", "\r", "\t": o += " "
+            default: o.append(c)
+            }
+        }
+        return o
+    }
+}
+
 // MARK: - Session log
 
 final class SessionLog {
@@ -463,6 +584,8 @@ final class SessionLog {
             s.journal = nil
             if let doc = SessionCutList.document(s.records) {
                 written += write(SessionCutList.json(doc), s.path("session.json"))
+                written += write(Data(SessionEditorFiles.fcpxml(doc, name: s.base).utf8), s.path("fcpxml"))
+                if let edl = SessionEditorFiles.edl(doc, name: s.base) { written += write(Data(edl.utf8), s.path("edl")) }
             }
             // the journal is only needed when the session file could not be written
             if !written.isEmpty { try? FileManager.default.removeItem(atPath: s.path("session.journal")) }
