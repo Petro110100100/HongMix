@@ -26,6 +26,8 @@ jobs:
         run: python3 -I scripts/check-i18n.py
 
       - name: Build LGPL FFmpeg
+        env:
+          FFMPEG_VERSION: "8.0"   # the script's ffmpeg-full lookup exits under pipefail when that formula is absent
         run: ./scripts/build-ffmpeg-lgpl.sh > build-ffmpeg.log 2>&1 || { tail -80 build-ffmpeg.log; exit 1; }
 
       - name: Build app and DMG (scripts/make-dmg.sh)
@@ -43,7 +45,7 @@ jobs:
           cp "${TMPDIR:-/tmp}"/hm-recfiles/shots/*.png out/shots/ 2>/dev/null || true
           cp "${TMPDIR:-/tmp}"/hm-recfiles/*.log out/ 2>/dev/null || true
           cp build/logs/*.txt build/logs/*.log out/ 2>/dev/null || true
-          find build -maxdepth 2 -name '*.dmg' -exec cp {} out/ \;
+          find build -maxdepth 2 -name '*.dmg' -exec cp {} out/ \; 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
         if: always()
