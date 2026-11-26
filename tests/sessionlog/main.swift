@@ -4,6 +4,9 @@
 // Covers: vMix recording-log text (date, TimeSpan duration, tag clean-up), session open/close with the
 // recorders, markers refused without a recording, frame-exact durations at 25, 29.97 and 59.94.
 import Foundation
+#if canImport(FoundationXML)
+import FoundationXML
+#endif
 
 var failures = 0
 var checks = 0
@@ -153,6 +156,53 @@ do {   // the same cut at 59.94 and 25: frames stay frames
     }
 }
 
+print("== editor files")
+do {
+    let header = SessionRecord(type: "session", frame: 0, text: "t", wall: 0, width: 1920, height: 1080, fpsNum: 30000, fpsDen: 1001)
+    let r: [SessionRecord] = [header,
+        SessionRecord(type: "input", frame: 0, input: "A", number: 1, text: "Host & Co"),
+        SessionRecord(type: "input", frame: 0, input: "B", number: 2, text: "Gość"),
+        SessionRecord(type: "file", frame: 0, input: "A", path: "/Rec/1_Host & Co.mov", role: "iso", recorder: "A"),
+        SessionRecord(type: "file", frame: 0, input: "B", path: "/Rec/2_Gość.mov", role: "iso", recorder: "B"),
+        rec("program", 0, input: "A", cause: "start"), rec("program", 300, input: "B", cause: "cut"),
+        SessionRecord(type: "marker", frame: 450, text: "<laugh> \"1\""),
+        rec("program", 1800, input: "A", cause: "cut"), SessionRecord(type: "stop", frame: 2000)]
+    let doc = SessionCutList.document(r)!
+    let x = SessionEditorFiles.fcpxml(doc, name: "HongMix_test")
+    let xml = try? XMLDocument(xmlString: x, options: [])
+    check(xml != nil, "FCPXML is well-formed XML")
+    if let root = xml?.rootElement() {
+        check(root.attribute(forName: "version")?.stringValue == "1.10", "fcpxml version 1.10")
+        let fmt = (try? root.nodes(forXPath: "//format"))?.first as? XMLElement
+        check(fmt?.attribute(forName: "frameDuration")?.stringValue == "1001/30000s", "frameDuration 1001/30000s")
+        let clips = ((try? root.nodes(forXPath: "//spine/asset-clip")) ?? []).compactMap { $0 as? XMLElement }
+        let rows = clips.map { c in ["offset", "start", "duration", "name"].map { c.attribute(forName: $0)?.stringValue ?? "?" }.joined(separator: " ") }
+        check(rows == ["0s 0s 1001/100s Host & Co", "1001/100s 1001/100s 1001/20s Gość", "3003/50s 3003/50s 1001/150s Host & Co"],
+              "clips: \(rows)")
+        let mk = ((try? root.nodes(forXPath: "//asset-clip/marker")) ?? []).compactMap { $0 as? XMLElement }
+        check(mk.count == 1 && mk[0].attribute(forName: "start")?.stringValue == "3003/200s"
+              && mk[0].attribute(forName: "value")?.stringValue == "<laugh> \"1\"", "marker at frame 450 on the Gość clip, text escaped")
+        let src = ((try? root.nodes(forXPath: "//media-rep/@src")) ?? []).map { $0.stringValue ?? "" }
+        check(src.contains("file:///Rec/1_Host%20&%20Co.mov") || src.contains("file:///Rec/1_Host%20%26%20Co.mov"), "file URL encoded: \(src)")
+        let seq = (try? root.nodes(forXPath: "//sequence"))?.first as? XMLElement
+        check(seq?.attribute(forName: "duration")?.stringValue == "2002/30s" || seq?.attribute(forName: "duration")?.stringValue == "1001/15s", "sequence 2000 frames")
+    }
+    let e = SessionEditorFiles.edl(doc, name: "HongMix_test")!
+    let lines = e.components(separatedBy: "\n")
+    check(lines[0] == "TITLE: HongMix_test" && lines[1] == "FCM: NON-DROP FRAME", "EDL header")
+    check(lines.contains("001  HOST_CO  AA/V  C        00:00:00:00 00:00:10:00 01:00:00:00 01:00:10:00"), "event 1 (reel from name): \n" + e)
+    check(lines.contains("002  GO       AA/V  C        00:00:10:00 00:01:00:00 01:00:10:00 01:01:00:00")
+          || lines.contains { $0.hasPrefix("002  ") && $0.hasSuffix("00:00:10:00 00:01:00:00 01:00:10:00 01:01:00:00") }, "event 2 at 29.97 NDF counts 30/s")
+    check(lines.contains("* LOC: 01:00:15:00 BLUE    <laugh> \"1\""), "marker as LOC")
+    check(lines.contains("* FROM CLIP NAME: 2_Gość.mov"), "clip name comment")
+    check(SessionEditorFiles.reel("Cam A") == "CAM_A" && SessionEditorFiles.reel("ąę") == "AX", "reel names")
+    var d60 = doc; d60.format.fpsNum = 60000
+    check(SessionEditorFiles.edl(d60, name: "x") == nil, "no EDL above 30 fps")
+    var d25 = doc; d25.format = .init(width: 1920, height: 1080, fpsNum: 25, fpsDen: 1, frameRate: "25/1")
+    let x25 = SessionEditorFiles.fcpxml(d25, name: "x")
+    check(x25.contains("frameDuration=\"1/25s\"") && x25.contains("offset=\"12s\""), "25p times reduce (300 frames = 12s)")
+}
+
 print("== session with journal")
 do {
     let dir = work + "/cut"
@@ -186,7 +236,7 @@ do {
         check(doc.startTick == 100 && doc.durationFrames == 100, "session 100…200")
         let shots = doc.shots.map { "\($0.start)-\($0.end) \($0.name ?? "")@\($0.fileFrame ?? -1)" }
         check(shots == ["0-1 Host@-1", "1-50 Host@0", "50-100 Guest@-1"], "shots from the state before the session + the cut: \(shots)")
-        check(written == [json], "onWritten reports session.json")
+        check(written.map { ($0 as NSString).lastPathComponent } == ["session.json", "fcpxml", "edl"].map { "HongMix_20261126_200000." + $0 }, "onWritten reports session.json, .fcpxml, .edl: \(written)")
         check(doc.shots.first?.file == nil && doc.shots.first?.start == 0, "Host shot starts at 0")
         check(doc.events.contains { $0.type == "overlay" && $0.frame == 0 && $0.on == true }, "overlay that was on at the start is logged at frame 0")
         check(doc.events.contains { $0.type == "marker" && $0.frame == 75 }, "marker at frame 75")

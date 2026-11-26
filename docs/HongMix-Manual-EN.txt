@@ -279,6 +279,9 @@ Settings (⌘,) → General → 언어 / Language: 한국어 / English. Switches
   inputs, every recorded file with the frame it starts at, every cut, transition, overlay, fade to black, marker and
   render stall, and a shot list (input + file + frame). While recording it is kept in a .session.journal file, one
   line per event, so a crash keeps the cuts up to that moment.
+  Beside it: HongMix_<date_time>.fcpxml (Final Cut Pro, DaVinci Resolve: File › Import › Timeline) and .edl (CMX3600,
+  Premiere; up to 30 fps) — the live cut as a timeline on the ISO files, the program file where an input has none,
+  markers on the clips. Every cut stays trimmable.
 
 [Multitrack recording] Record ⚙ › Multitrack audio › switch on buses (M, A–G) as extra tracks.
   Track 1 = the audio bus (usually Master), then the extra buses in order — remix mics/music in the edit.
