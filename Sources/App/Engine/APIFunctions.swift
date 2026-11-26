@@ -18,8 +18,7 @@ enum APIProcessor {
                                       "videodelay", "savevideodelay", "autoplayfirst",
                                       "autoplaynext", "audiochannelmatrix", "setvolumechannelmixer",
                                       "colourcorrectionauto", "inputpreview", "waitforcompletion", "livepause",
-                                      "liveplaypause", "keypress", "lastpreset", "openpreset", "savepreset",
-                                      "writedurationtorecordinglog"]
+                                      "liveplaypause", "keypress", "lastpreset", "openpreset", "savepreset"]
 
     static func resolveInput(_ value: String?, _ e: SwitcherEngine) -> InputSource? {
         guard let v = value?.trimmingCharacters(in: .whitespaces), !v.isEmpty else { return nil }
@@ -513,6 +512,8 @@ enum APIProcessor {
             ext[1].config.bus = b
         case "snapshot":
             return e.snapshot(path: value.isEmpty ? nil : value) == nil ? "Snapshot failed" : nil
+        case "writedurationtorecordinglog":   // vMix: recording duration + optional tag text (Value) → <name>.log
+            return e.writeRecordingLog(value)
         // ===== Data Sources (vMix: DataSourceSelectRow Value=Name,Table,Index · Next/PreviousRow Value=Name,Table)
         case "datasourceselectrow", "datasourcenextrow", "datasourcepreviousrow", "datasourceautonexton",
              "datasourceautonextoff", "datasourceautonextonoff":

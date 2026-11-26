@@ -16,14 +16,14 @@ HongMix는 HTTP(`http://<IP>:8088/api/?Function=이름&Input=…&Value=…`)와 
 | 범주 | 구현 | 전체 |
 |---|---|---|
 | Transition | 20 | 20 |
-| Output | 30 | 31 |
+| Output | 31 | 31 |
 | Overlay | 25 | 34 |
 | Audio | 48 | 70 |
 | Title | 24 | 24 |
 | Input | 54 | 98 |
 | NDI | 2 | 5 |
 | Browser | 8 | 8 |
-| **합계** | **211** | **290** |
+| **합계** | **212** | **290** |
 
 제외한 범주(맥 포팅 범위에서 뺌): Replay (~175), PTZ (22), PlayList (5), DataSources (9), Scripting (5), Preset (3)
 
@@ -73,6 +73,7 @@ HongMix는 HTTP(`http://<IP>:8088/api/?Function=이름&Input=…&Value=…`)와 
 | `IdentifyMonitors` |  | 연결된 화면에 모니터 번호를 잠시 표시합니다. |
 | `Snapshot` | [Value=파일 경로] | Output을 PNG로 저장합니다 (기본 위치 ~/Pictures/HongMix). |
 | `SnapshotInput` | Input [Value=경로] | 입력 화면을 PNG로 저장합니다. |
+| `WriteDurationToRecordingLog` | [Value=태그 텍스트] | 현재 녹화 시간과 태그를 녹화 폴더의 `HongMix_<날짜_시간>.log`에 한 줄로 기록합니다 (vMix 녹화 로그 형식). Record 출력이나 MultiCorder가 녹화 중일 때만 동작하고, 아니면 `No recording running`으로 응답합니다. |
 
 ## 입력 (Input)
 
@@ -205,7 +206,6 @@ HongMix는 HTTP(`http://<IP>:8088/api/?Function=이름&Input=…&Value=…`)와 
 
 ## 아직 구현하지 않은 함수 (범주별)
 
-- **Output**: WriteDurationToRecordingLog
 - **Overlay**: MoveMultiViewOverlay, MultiViewOverlay, MultiViewOverlayOff, MultiViewOverlayOn, PreviewOverlayInput1, PreviewOverlayInput2, PreviewOverlayInput3, PreviewOverlayInput4, SetMultiViewOverlay
 - **Audio**: AudioChannelMatrixApplyPreset, AudioPluginOff, AudioPluginOn, AudioPluginOnOff, AudioPluginShow, BusAAudioPluginOff, BusAAudioPluginOn, BusAAudioPluginOnOff, BusAAudioPluginShow, BusBAudioPluginOff, BusBAudioPluginOn, BusBAudioPluginOnOff, BusBAudioPluginShow, BusXAudioPluginOff, BusXAudioPluginOn, BusXAudioPluginOnOff, BusXAudioPluginShow, MasterAudioPluginOff, MasterAudioPluginOn, MasterAudioPluginOnOff, MasterAudioPluginShow, SetVolumeChannelMixer
 - **Input**: AutoPlayFirst, AutoPlayFirstOff, AutoPlayFirstOn, AutoPlayNext, AutoPlayNextOff, AutoPlayNextOn, ColourCorrectionAuto, InputPreviewHide, InputPreviewShow, InputPreviewShowHide, LayerOff, LayerOn, LayerOnOff, ListAdd, ListExport, ListPlayOut, ListRemove, ListRemoveAll, ListShowHide, ListShuffle, LivePlayPause, MoveLayer, NextItem, NextPicture, PreviousItem, PreviousPicture, SaveVideoDelay, SelectCategory, SelectIndex, SetDynamicInput1, SetDynamicInput2, SetDynamicInput3, SetDynamicInput4, SetLayer, SetPictureEffect, SetPictureEffectDuration, SetPictureTransition, VideoCallAudioSource, VideoCallVideoSource, VideoDelayStartRecording, VideoDelayStartStopRecording, VideoDelayStopRecording, WaitForCompletion

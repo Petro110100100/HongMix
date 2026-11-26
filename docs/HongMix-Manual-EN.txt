@@ -270,6 +270,11 @@ Settings (⌘,) → General → 언어 / Language: 한국어 / English. Switches
   Amount (−15 dB), threshold (−38 dB), release (0.9 s).
   API: DuckingOn / DuckingOff / SetDuckTrigger · SetDucked Input=… Value=On|Off
 
+[Recording log] While Record or MultiCorder is recording, WriteDurationToRecordingLog (key, MIDI, Stream Deck,
+  API Value=tag text) writes the recording duration and the tag to HongMix_<date_time>.log in the recording folder,
+  one line per mark in vMix's recording-log format. Without a recording it is refused.
+  API: WriteDurationToRecordingLog Value=good quote
+
 [Multitrack recording] Record ⚙ › Multitrack audio › switch on buses (M, A–G) as extra tracks.
   Track 1 = the audio bus (usually Master), then the extra buses in order — remix mics/music in the edit.
   API: SetRecordAudioTracks Value=AB

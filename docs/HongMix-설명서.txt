@@ -269,6 +269,11 @@ API: SetText Input=번호 SelectedName=Headline.Text Value=내용
   줄이는 양(기본 −15 dB) · 감지 레벨(−38 dB) · 복귀 시간(0.9초).
   API: DuckingOn / DuckingOff / SetDuckTrigger · SetDucked Input=… Value=On|Off
 
+[녹화 로그] Record나 MultiCorder가 녹화 중일 때 WriteDurationToRecordingLog(단축키, MIDI, Stream Deck,
+  API Value=태그 텍스트)를 실행하면 녹화 폴더의 HongMix_<날짜_시간>.log에 녹화 시간과 태그가
+  vMix 녹화 로그 형식으로 한 줄씩 기록됩니다. 녹화 중이 아니면 거부됩니다.
+  API: WriteDurationToRecordingLog Value=좋은 장면
+
 [멀티트랙 녹화] Record ⚙ › 멀티트랙 오디오 › 추가 트랙에 버스(M, A–G)를 켭니다.
   트랙 1 = 오디오 버스(보통 Master), 트랙 2부터 켠 순서대로 버스. 편집 프로그램에서 마이크/음악을 따로 다시 믹스.
   API: SetRecordAudioTracks Value=AB

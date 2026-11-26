@@ -167,6 +167,8 @@ private struct RenderState {
     /// Per-monitor display outputs (DisplayMap), slot index → source; nil = slot unused.
     var displaySources = [BusSource?](repeating: nil, count: SwitcherEngine.displaySlotCount)
     var isoMasterAudio = false
+    /// Tick the render loop is producing now (session log positions).
+    var renderedTick: Int64 = -1
 }
 
 /// The switcher: owns inputs, outputs, the render clock, GPU mixer and audio mixer.
@@ -373,6 +375,9 @@ final class SwitcherEngine: ObservableObject {
     private var volumeFades: [UUID: (from: Float, to: Float, start: CFTimeInterval, duration: Double)] = [:]
     let api = HTTPAPIServer()
     let tcpAPI = TCPAPIServer()
+    /// Recording log / cut list of the current recording session (SessionLog.swift).
+    let sessionLog = SessionLog()
+    private var sessionLogSub: AnyCancellable?
     private var childSubscriptions: [UUID: AnyCancellable] = [:]
 
     init(format: VideoFormat = .defaultFormat) {
@@ -441,6 +446,8 @@ final class SwitcherEngine: ObservableObject {
         statsTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
             self?.publishStats()
         }
+        sessionLog.onMessage = { [weak self] in self?.lastMessage = $0 }
+        sessionLogSub = switchEvents.sink { [weak self] in self?.syncSessionLog() }
         let uiProbeInterval = 0.02
         let watch = Timer(timeInterval: uiProbeInterval, repeats: true) { [weak self] _ in
             guard let self = self else { return }
@@ -499,6 +506,7 @@ final class SwitcherEngine: ObservableObject {
     func shutdown() {
         for o in outputs where o.running { o.stop(waitForClose: true) }
         stopMultiCorder(wait: true)
+        sessionLog.close(tick: nextRenderTick(), wait: true)
         stopRenderLoop()
         for i in inputs { i.stop() }
         api.stop()
@@ -528,6 +536,13 @@ final class SwitcherEngine: ObservableObject {
         stateLock.lock()
         body(&rs)
         stateLock.unlock()
+    }
+
+    /// The next frame the render loop will produce (main thread; session log positions).
+    func nextRenderTick() -> Int64 {
+        var t: Int64 = -1
+        withState { t = $0.renderedTick }
+        return t + 1
     }
 
     // MARK: Inputs
@@ -1347,6 +1362,18 @@ final class SwitcherEngine: ObservableObject {
         lastMessage = multiCorderError!
     }
 
+    /// MultiCorder: input → file each ISO recorder writes now (session log).
+    func isoRecorderFiles() -> [(UUID, String)] {
+        var out: [(UUID, String)] = []
+        var buf = [CChar](repeating: 0, count: 1024)
+        stateLock.lock()
+        for (id, h) in isoOutputs where mc_output_current_file(h, &buf, Int32(buf.count)) > 0 {
+            out.append((id, String(cString: buf)))
+        }
+        stateLock.unlock()
+        return out.sorted { $0.1 < $1.1 }
+    }
+
     // [Recording safety hook] MultiCorder folder + bytes written by its ISO recorders (RecordingSafety).
     var multiCorderFolderPath: String? { multiCorderOn ? (multiCorderSettings.folder as NSString).expandingTildeInPath : nil }
     func multiCorderBytesWritten() -> Int64 {
@@ -1843,6 +1870,7 @@ final class SwitcherEngine: ObservableObject {
         let now = CACurrentMediaTime()
         // 1. Snapshot + advance animated state
         stateLock.lock()
+        rs.renderedTick = tick
         var completed = false
         var t: Float = 0
         if rs.transitionActive {
@@ -2110,6 +2138,7 @@ final class SwitcherEngine: ObservableObject {
         }
         droppedTicks = dropped
         for o in outputs { o.refreshStats() }
+        syncSessionLog()               // a Record output stopped from its own button sends no switch event
         recordingSafety.update(self)   // [Recording safety hook]
         // 2-minute health history for the Statistics graphs
         var rtt = 0.0, loss = 0.0
