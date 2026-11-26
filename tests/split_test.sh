@@ -67,6 +67,11 @@ for f in sys.argv[2:]:
 check(n[0] + n[1] == pushed, f"frames file1 + file2 = {n[0]} + {n[1]} = {n[0]+n[1]} (pushed {pushed})")
 check(int(run['frames_dropped']) == 0, "encoder dropped no frames")
 check(abs(n[0] - 90) <= 3, "cut at ~3 s")
+# mc_output_current_file_start_tick: tick of each file's first frame (session log positions)
+t0 = int(run['tick0'])
+check(run['start_before'] == '-1', "start tick -1 before the first frame")
+check(int(run['start1']) == t0, f"file 1 starts at tick {run['start1']} (first pushed {t0})")
+check(int(run['start2']) == t0 + n[0], f"file 2 starts at tick {run['start2']} = {t0} + {n[0]} frames of file 1")
 sys.exit(0 if ok else 1)
 PY
 done

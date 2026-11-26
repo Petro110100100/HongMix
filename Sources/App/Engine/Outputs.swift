@@ -763,6 +763,16 @@ final class OutputChannel: ObservableObject, Identifiable {
         return mc_output_srt_stats(f, &st) != 0 ? SRTStats(st) : nil
     }
 
+    /// Record outputs: the file being written now and the render tick of its first frame (-1 = none yet).
+    func recordingFile() -> (String, Int64)? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard config.kind == .record, let f = ffOut else { return nil }
+        var cur = [CChar](repeating: 0, count: 1024)
+        guard mc_output_current_file(f, &cur, Int32(cur.count)) > 0 else { return nil }
+        return (String(cString: cur), mc_output_current_file_start_tick(f))
+    }
+
     func refreshStats() {
         guard running else { return }
         if config.kind == .record && config.splitMinutes > 0 &&

@@ -378,6 +378,13 @@ final class SwitcherEngine: ObservableObject {
     /// Recording log / cut list of the current recording session (SessionLog.swift).
     let sessionLog = SessionLog()
     private var sessionLogSub: AnyCancellable?
+    /// Render thread only: the state of the previous frame, to see what changed (session log).
+    private var sessionPrev: RenderState?
+    private var sessionTransitionStart: Int64 = 0
+    /// MultiCorder settings › "Cut list": write <name>.session.json with every switch (off by default).
+    @Published var sessionCutList: Bool = UserDefaults.standard.bool(forKey: "sessionCutList") {
+        didSet { UserDefaults.standard.set(sessionCutList, forKey: "sessionCutList") }
+    }
     private var childSubscriptions: [UUID: AnyCancellable] = [:]
 
     init(format: VideoFormat = .defaultFormat) {
@@ -1362,13 +1369,13 @@ final class SwitcherEngine: ObservableObject {
         lastMessage = multiCorderError!
     }
 
-    /// MultiCorder: input → file each ISO recorder writes now (session log).
-    func isoRecorderFiles() -> [(UUID, String)] {
-        var out: [(UUID, String)] = []
+    /// MultiCorder: input → file each ISO recorder writes now and the tick of its first frame (session log).
+    func isoRecorderFiles() -> [(UUID, String, Int64)] {
+        var out: [(UUID, String, Int64)] = []
         var buf = [CChar](repeating: 0, count: 1024)
         stateLock.lock()
         for (id, h) in isoOutputs where mc_output_current_file(h, &buf, Int32(buf.count)) > 0 {
-            out.append((id, String(cString: buf)))
+            out.append((id, String(cString: buf), mc_output_current_file_start_tick(h)))
         }
         stateLock.unlock()
         return out.sorted { $0.1 < $1.1 }
@@ -1617,10 +1624,12 @@ final class SwitcherEngine: ObservableObject {
                 stateLock.unlock()
                 if sleeping {                         // resume the clock without counting the gap
                     start = now - toAbs(Double(tick) * frameNs)
+                    sessionStall(tick: tick, lateness: lateness, tb: tb)
                     continue
                 }
                 if lateness > toAbs(frameNs * 3) {
                     start = now - toAbs(Double(tick) * frameNs)
+                    sessionStall(tick: tick, lateness: lateness, tb: tb)
                     continue
                 }
             }
@@ -1911,6 +1920,7 @@ final class SwitcherEngine: ObservableObject {
         let outs = renderOutputs
         let isos = isoOutputs
         stateLock.unlock()
+        sessionObserve(st, tick: tick)
 
         if completed {
             DispatchQueue.main.async {
@@ -2078,6 +2088,55 @@ final class SwitcherEngine: ObservableObject {
                 }
             }
         }
+    }
+
+    // MARK: Session log (render thread)
+
+    /// Compares this frame's state snapshot with the previous frame and hands changes to the session log.
+    /// Integer/UUID compares only; a record is built only when something changed (human-speed events).
+    private func sessionObserve(_ st: RenderState, tick: Int64) {
+        guard let p = sessionPrev else {
+            sessionPrev = st
+            sessionLog.ingest(SessionRecord(type: "program", frame: tick, input: st.programID?.uuidString, cause: "start"))
+            return
+        }
+        if st.transitionActive && !p.transitionActive {
+            sessionTransitionStart = tick
+            sessionLog.ingest(SessionRecord(type: "transition", frame: tick, input: st.previewID?.uuidString,
+                                            from: st.programID?.uuidString,
+                                            transition: st.manualT != nil ? "tbar" : st.transition.rawValue))
+        }
+        if st.programID != p.programID {
+            var cause = "cut"
+            var start: Int64? = nil
+            if p.stinger != nil { cause = "stinger" }
+            else if p.transitionActive { cause = p.manualT != nil ? "tbar" : "transition"; start = sessionTransitionStart }
+            sessionLog.ingest(SessionRecord(type: "program", frame: tick, input: st.programID?.uuidString,
+                                            from: p.programID?.uuidString, cause: cause,
+                                            transition: start != nil && p.manualT == nil ? p.transition.rawValue : nil,
+                                            start: start))
+        } else if p.transitionActive && !st.transitionActive {
+            // T-bar pulled back: the transition ended without a switch
+            sessionLog.ingest(SessionRecord(type: "transition", frame: tick, input: p.previewID?.uuidString,
+                                            from: st.programID?.uuidString, cause: "aborted", start: sessionTransitionStart))
+        }
+        for k in 0..<min(st.overlays.count, p.overlays.count) {
+            let on = st.overlays[k].target > 0, wasOn = p.overlays[k].target > 0
+            if on != wasOn || (on && st.overlays[k].id != p.overlays[k].id) {
+                sessionLog.ingest(SessionRecord(type: "overlay", frame: tick, input: st.overlays[k].id?.uuidString,
+                                                channel: k + 1, on: on))
+            }
+        }
+        if (st.ftbTarget > 0) != (p.ftbTarget > 0) {
+            sessionLog.ingest(SessionRecord(type: "fadeToBlack", frame: tick, on: st.ftbTarget > 0))
+        }
+        sessionPrev = st
+    }
+
+    /// The render clock was reset after a stall or Mac sleep: files have no gap, but wall time moved on.
+    private func sessionStall(tick: Int64, lateness: UInt64, tb: mach_timebase_info_data_t) {
+        let ms = Double(lateness) * Double(tb.numer) / Double(tb.denom) / 1_000_000
+        sessionLog.ingest(SessionRecord(type: "stall", frame: tick, lostMs: Int(ms.rounded())))
     }
 
     private func push(frame f: CVPixelBuffer, to o: OutputChannel, fmt: VideoFormat, tick: Int64) {

@@ -274,6 +274,11 @@ Settings (⌘,) → General → 언어 / Language: 한국어 / English. Switches
   API Value=tag text) writes the recording duration and the tag to HongMix_<date_time>.log in the recording folder,
   one line per mark in vMix's recording-log format. Without a recording it is refused.
   API: WriteDurationToRecordingLog Value=good quote
+  Cut list: MultiCorder settings › Cut list › "Log every switch while recording" (off by default). When the
+  last recorder stops, HongMix_<date_time>.session.json lands next to the log: format (exact rate, e.g. 30000/1001),
+  inputs, every recorded file with the frame it starts at, every cut, transition, overlay, fade to black, marker and
+  render stall, and a shot list (input + file + frame). While recording it is kept in a .session.journal file, one
+  line per event, so a crash keeps the cuts up to that moment.
 
 [Multitrack recording] Record ⚙ › Multitrack audio › switch on buses (M, A–G) as extra tracks.
   Track 1 = the audio bus (usually Master), then the extra buses in order — remix mics/music in the edit.

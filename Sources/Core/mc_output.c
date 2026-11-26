@@ -100,6 +100,7 @@ struct mc_output {
     // "New file every N min" (mc_output_split): requested path, taken by the output thread (lock)
     char *split_req;
     char *cur_path;           // file being written now (lock), see mc_output_current_file
+    int64_t cur_start_tick;   // tick of that file's first frame, -1 before it (lock)
 
     // recording safety (files): backup mirror + continue on another disk
     char *mirror_dir, *spill_dir;   // owned copies of cfg.mirror_dir / cfg.spill_dir (NULL = off)
@@ -1634,6 +1635,7 @@ static int split_begin(mc_output *o, osession *s, const char *path, int64_t cut_
     pthread_mutex_lock(&o->lock);
     free(o->cur_path);
     o->cur_path = strdup(path);
+    o->cur_start_tick = o->base_tick + cut_v;   // the frame about to be encoded opens the new file
     pthread_mutex_unlock(&o->lock);
     return 0;
 }
@@ -1866,6 +1868,7 @@ mc_output *mc_output_open(const mc_output_config *cfg, mc_status_cb status_cb, v
     o->vcodec = cfg->video_codec ? strdup(cfg->video_codec) : NULL;
     o->cfg.delay_dir = cfg->delay_dir && cfg->delay_dir[0] ? strdup(cfg->delay_dir) : NULL;
     o->cur_path = strdup(cfg->url);
+    o->cur_start_tick = -1;
     o->mirror_dir = cfg->mirror_dir && cfg->mirror_dir[0] ? strdup(cfg->mirror_dir) : NULL;
     o->spill_dir = cfg->spill_dir && cfg->spill_dir[0] ? strdup(cfg->spill_dir) : NULL;
     o->cfg.mirror_dir = o->mirror_dir;
@@ -1912,6 +1915,7 @@ void mc_output_push_video(mc_output *o, const uint8_t *bgra, int stride, int64_t
     if (o->need_sync) {
         o->need_sync = 0;
         o->base_tick = tick;
+        o->cur_start_tick = tick;
         vq_clear(o);
         afifo_clear_all(o);
     }
@@ -1947,6 +1951,7 @@ void mc_output_push_pixelbuffer(mc_output *o, void *pixel_buffer, int64_t tick) 
     if (o->need_sync) {
         o->need_sync = 0;
         o->base_tick = tick;
+        o->cur_start_tick = tick;
         vq_clear(o);
         afifo_clear_all(o);
     }
@@ -2049,6 +2054,14 @@ int mc_output_current_file(mc_output *o, char *buf, int len) {
     snprintf(buf, (size_t)len, "%s", o->cur_path ? o->cur_path : "");
     pthread_mutex_unlock(&o->lock);
     return (int)strlen(buf);
+}
+
+int64_t mc_output_current_file_start_tick(mc_output *o) {
+    if (!o) return -1;
+    pthread_mutex_lock(&o->lock);
+    int64_t t = o->cur_start_tick;
+    pthread_mutex_unlock(&o->lock);
+    return t;
 }
 
 int mc_output_backup_file(mc_output *o, char *buf, int len) {

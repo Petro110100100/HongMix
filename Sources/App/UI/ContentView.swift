@@ -1023,6 +1023,12 @@ struct MultiCorderSheet: View {
                         MultiCorderInputRow(input: i, number: engine.number(of: i))
                     }
                 }
+                Section(L("컷 리스트")) {
+                    Toggle(L("녹화하는 동안 모든 전환 기록"), isOn: $engine.sessionCutList)
+                    Text(L("녹화가 끝나면 녹화 폴더에 HongMix_<날짜_시간>.session.json을 씁니다: 프레임 단위 컷, 마커, 녹화 파일. 편집 프로그램에서 컷을 다시 만들 때 씁니다."))
+                        .font(.caption).foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             .formStyle(.grouped)
             .textFieldStyle(.roundedBorder)

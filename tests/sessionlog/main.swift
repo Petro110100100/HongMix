@@ -82,5 +82,128 @@ do {   // no marker → no log file
     check(!FileManager.default.fileExists(atPath: work + "/HongMix_20261126_190000.log"), "no log file without markers")
 }
 
+
+print("== cut list")
+func rec(_ type: String, _ frame: Int64, input: String? = nil, cause: String? = nil, start: Int64? = nil) -> SessionRecord {
+    SessionRecord(type: type, frame: frame, input: input, cause: cause, start: start)
+}
+do {
+    // session at tick 5000, 29.97; Cam A and Cam B have ISO files, Cam C only shows in the program file
+    let header = SessionRecord(type: "session", frame: 5000, text: "HongMix test", wall: 1_800_000_000,
+                               width: 1920, height: 1080, fpsNum: 30000, fpsDen: 1001)
+    var r: [SessionRecord] = [header]
+    for (i, n) in ["A", "B", "C"].enumerated() {
+        r.append(SessionRecord(type: "input", frame: 5000, input: n, number: i + 1, text: "Cam \(n)"))
+    }
+    r.append(rec("program", 5000, input: "A", cause: "start"))
+    r.append(SessionRecord(type: "file", frame: 5003, path: "/r/pgm.mp4", role: "program", recorder: "P"))
+    r.append(SessionRecord(type: "file", frame: 5002, input: "A", path: "/r/1_A.mov", role: "iso", recorder: "A"))
+    r.append(SessionRecord(type: "file", frame: 5002, input: "B", path: "/r/2_B.mov", role: "iso", recorder: "B"))
+    r.append(rec("program", 5300, input: "B", cause: "cut"))
+    r.append(SessionRecord(type: "transition", frame: 5600, input: "A", from: "B", transition: "fade"))
+    r.append(rec("program", 5630, input: "A", cause: "transition", start: 5600))   // cut at 5615
+    r.append(SessionRecord(type: "marker", frame: 5700, text: "good line", wall: 1_800_000_023))
+    r.append(rec("program", 5900, input: "C", cause: "cut"))                       // no ISO → program file
+    r.append(SessionRecord(type: "file", frame: 6000, input: "A", path: "/r/1_A_2.mov", role: "iso", recorder: "A"))  // split
+    r.append(rec("program", 6100, input: "A", cause: "stinger"))
+    r.append(SessionRecord(type: "stall", frame: 6150, lostMs: 140))
+    r.append(SessionRecord(type: "stop", frame: 6200))
+    let doc = SessionCutList.document(r)!
+    check(doc.startTick == 5000 && doc.durationFrames == 1200, "frame 0 = session start, 1200 frames")
+    check(doc.format.frameRate == "30000/1001", "exact rate 30000/1001")
+    check(doc.inputs.map(\.name) == ["Cam A", "Cam B", "Cam C"], "inputs by number")
+    check(doc.files.count == 4, "4 files")
+    let a1 = doc.files.first { $0.path == "/r/1_A.mov" }!
+    check(a1.firstFrame == 2 && a1.endFrame == 1000, "ISO A file 1: frames 2…1000 (split at 1000)")
+    let s = doc.shots.map { "\($0.start)-\($0.end) \($0.name ?? "-") \($0.source ?? "-") \($0.file.map { ($0 as NSString).lastPathComponent } ?? "-")@\($0.fileFrame ?? -1)" }
+    let expected = [
+        "0-2 Cam A - -@-1",                         // ISO not started yet, program file neither
+        "2-300 Cam A iso 1_A.mov@0",
+        "300-615 Cam B iso 2_B.mov@298",            // fade 600…630 cut at its midpoint
+        "615-900 Cam A iso 1_A.mov@613",
+        "900-1100 Cam C program pgm.mp4@897",       // Cam C has no ISO: program file (started at 3)
+        "1100-1200 Cam A iso 1_A_2.mov@100",        // stinger cut, after the split
+    ]
+    check(s == expected, "shots:\n      " + s.joined(separator: "\n      "))
+    let m = doc.events.first { $0.type == "marker" }!
+    check(m.frame == 700 && m.text == "good line", "marker at session frame 700")
+    check(doc.events.contains { $0.type == "stall" && $0.frame == 1150 && $0.lostMs == 140 }, "stall kept")
+    check(!doc.events.contains { ["session", "input", "file", "stop"].contains($0.type) }, "header/inputs/files not in events")
+    // JSON round trip
+    let data = SessionCutList.json(doc)!
+    let back = try! JSONDecoder().decode(SessionDocument.self, from: data)
+    check(back == doc, "session.json decodes to the same document")
+    let text = String(decoding: data, as: UTF8.self)
+    check(!text.contains("\"lostMs\" : null") && text.contains("\"frameRate\" : \"30000\\/1001\"") == false
+          && text.contains("\"frameRate\" : \"30000/1001\""), "no nulls, slashes not escaped")
+    // crash: journal without stop → ends at the last record
+    let crashed = SessionCutList.document(Array(r.dropLast()))!
+    check(crashed.durationFrames == 1150, "journal without stop ends at the last event")
+}
+do {   // the same cut at 59.94 and 25: frames stay frames
+    for (num, den) in [(60000, 1001), (25, 1)] {
+        let r: [SessionRecord] = [
+            SessionRecord(type: "session", frame: 0, wall: 0, width: 1920, height: 1080, fpsNum: num, fpsDen: den),
+            SessionRecord(type: "file", frame: 1, input: "A", path: "/a.mov", role: "iso", recorder: "A"),
+            SessionRecord(type: "file", frame: 1, input: "B", path: "/b.mov", role: "iso", recorder: "B"),
+            rec("program", 0, input: "A", cause: "start"), rec("program", 1234, input: "B", cause: "cut"),
+            rec("program", 4321, input: "A", cause: "cut"), SessionRecord(type: "stop", frame: 9000)]
+        let d = SessionCutList.document(r)!
+        check(d.shots.map(\.start) == [0, 1, 1234, 4321] && d.shots[2].fileFrame == 1233, "cuts at \(num)/\(den) land on their frames")
+    }
+}
+
+print("== session with journal")
+do {
+    let dir = work + "/cut"
+    try! FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    let log = SessionLog()
+    let start = date("2026-11-26 20:00:00")
+    let A = UUID(), B = UUID()
+    log.ingest(SessionRecord(type: "program", frame: 10, input: A.uuidString, cause: "start"))   // before the session
+    log.ingest(SessionRecord(type: "overlay", frame: 20, input: B.uuidString, channel: 1, on: true))
+    let ins = [SessionInputInfo(id: A.uuidString, number: 1, name: "Host"), SessionInputInfo(id: B.uuidString, number: 2, name: "Guest")]
+    var isoA = SessionRecorder(key: A.uuidString, role: .iso, input: A, path: dir + "/1_Host.mov")
+    log.sync(recorders: [isoA], tick: 100, format: fmt25, inputs: ins, cutList: true, now: start)
+    isoA.firstTick = 101
+    log.sync(recorders: [isoA], tick: 130, format: fmt25, inputs: ins, cutList: true, now: start)
+    log.ingest(SessionRecord(type: "program", frame: 150, input: B.uuidString, from: A.uuidString, cause: "cut"))
+    _ = log.marker("laugh", tick: 175, now: date("2026-11-26 20:00:03"))
+    log.flush()
+    let journal = dir + "/HongMix_20261126_200000.session.journal"
+    let jr = SessionCutList.records(journal: (try? Data(contentsOf: URL(fileURLWithPath: journal))) ?? Data())
+    check(jr.first?.type == "session" && jr.contains { $0.type == "marker" }, "journal written while recording (\(jr.count) lines)")
+    var written: [String] = []
+    log.onWritten = { written = $0 }
+    log.sync(recorders: [], tick: 200, format: fmt25, inputs: ins, cutList: true, now: date("2026-11-26 20:00:04"))
+    log.flush()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.2))   // onWritten comes on the main queue
+    let json = dir + "/HongMix_20261126_200000.session.json"
+    let doc = (try? Data(contentsOf: URL(fileURLWithPath: json))).flatMap { try? JSONDecoder().decode(SessionDocument.self, from: $0) }
+    check(doc != nil, "session.json written")
+    check(!FileManager.default.fileExists(atPath: journal), "journal removed after a clean stop")
+    if let doc {
+        check(doc.startTick == 100 && doc.durationFrames == 100, "session 100…200")
+        let shots = doc.shots.map { "\($0.start)-\($0.end) \($0.name ?? "")@\($0.fileFrame ?? -1)" }
+        check(shots == ["0-1 Host@-1", "1-50 Host@0", "50-100 Guest@-1"], "shots from the state before the session + the cut: \(shots)")
+        check(written == [json], "onWritten reports session.json")
+        check(doc.shots.first?.file == nil && doc.shots.first?.start == 0, "Host shot starts at 0")
+        check(doc.events.contains { $0.type == "overlay" && $0.frame == 0 && $0.on == true }, "overlay that was on at the start is logged at frame 0")
+        check(doc.events.contains { $0.type == "marker" && $0.frame == 75 }, "marker at frame 75")
+        check(doc.files.first?.firstFrame == 1, "ISO file first frame 1")
+    }
+}
+do {   // cut list off: no journal, no session.json, log still works
+    let dir = work + "/off"
+    try! FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    let log = SessionLog()
+    log.sync(recorders: [SessionRecorder(key: "P", role: .program, input: nil, path: dir + "/r.mp4", firstTick: 5)],
+             tick: 5, format: fmt25, cutList: false, now: date("2026-11-26 21:00:00"))
+    _ = log.marker("x", tick: 30)
+    log.close(tick: 50, wait: true)
+    let names = (try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []
+    check(names == ["HongMix_20261126_210000.log"], "cut list off: only the .log (\(names))")
+}
+
 print(failures == 0 ? "PASS (\(checks) checks)" : "FAIL (\(failures) of \(checks))")
 exit(failures == 0 ? 0 : 1)

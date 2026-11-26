@@ -194,6 +194,9 @@ void mc_output_dump_delay(mc_output *out);
 int mc_output_split(mc_output *out, const char *new_path);
 /* Path of the file currently being written (changes after a split). Returns its length. */
 int mc_output_current_file(mc_output *out, char *buf, int len);
+/* Tick (the value passed to mc_output_push_video/_pixelbuffer) of the first frame of the file being written
+   now: frame N of that file is tick start + N. Follows a split. -1 before the first frame. */
+int64_t mc_output_current_file_start_tick(mc_output *out);
 /* Path of the backup (mirror) file being written now, "" when none. Returns its length. */
 int mc_output_backup_file(mc_output *out, char *buf, int len);
 /* Last recording-safety warning (backup failed, continued on the backup / spill disk, …). Returns its length. */

@@ -10,6 +10,7 @@
 
 #define W 640
 #define H 360
+#define TICK0 1000
 
 static void on_status(void *u, int st, const char *m) {
     (void)u;
@@ -34,6 +35,7 @@ int main(int argc, char **argv) {
     // wait until it records (frames pushed before RUNNING are not accepted)
     for (int i = 0; i < 300; i++) { mc_output_get_stats(rec, &st); if (st.state == MC_STATE_RUNNING) break; mc_sleep_us(10000); }
     int split_rc = -2;
+    int64_t start_before = mc_output_current_file_start_tick(rec), start1 = -2;
     t0 = mc_now_us();
     for (int64_t tick = 0; tick < 180; tick++) {
         for (int y = 0; y < H; y++)
@@ -41,7 +43,8 @@ int main(int argc, char **argv) {
                 uint8_t *p = img + ((size_t)y * W + x) * 4;
                 p[0] = (uint8_t)(x + tick * 4); p[1] = (uint8_t)(y + tick * 2); p[2] = (uint8_t)(tick * 7); p[3] = 255;
             }
-        mc_output_push_video(rec, img, W * 4, tick);
+        mc_output_push_video(rec, img, W * 4, TICK0 + tick);   // render ticks don't start at 0
+        if (tick == 0) start1 = mc_output_current_file_start_tick(rec);
         for (int i = 0; i < 1600; i++, sample++) {
             tone[i * 2] = tone[i * 2 + 1] = 0.3f * (float)sin(2 * M_PI * 1000.0 * sample / 48000.0);
         }
@@ -53,11 +56,13 @@ int main(int argc, char **argv) {
     mc_sleep_us(200000);
     char cur[1024];
     mc_output_current_file(rec, cur, sizeof(cur));
+    int64_t start2 = mc_output_current_file_start_tick(rec);
     mc_output_get_stats(rec, &st);
     mc_output_close(rec);
-    printf("split_rc=%d\nencoder=%s\nframes_pushed=180\nframes_encoded=%lld\nframes_dropped=%lld\nsamples_pushed=%lld\ncurrent_file_ok=%d\n",
+    printf("split_rc=%d\nencoder=%s\nframes_pushed=180\nframes_encoded=%lld\nframes_dropped=%lld\nsamples_pushed=%lld\ncurrent_file_ok=%d\n"
+           "tick0=%d\nstart_before=%lld\nstart1=%lld\nstart2=%lld\n",
            split_rc, st.encoder, (long long)st.frames_encoded, (long long)st.frames_dropped, (long long)sample,
-           strcmp(cur, f2) == 0);
+           strcmp(cur, f2) == 0, TICK0, (long long)start_before, (long long)start1, (long long)start2);
     free(img);
     return 0;
 }
