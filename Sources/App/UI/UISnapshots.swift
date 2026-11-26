@@ -39,6 +39,12 @@ enum UISnapshots {
             return view(VStack(spacing: 0) { TopBar(); SystemHealthBanner(preview: fake) }
                             .environmentObject(engine).padding(4).background(Color(white: 0.09)),
                         size: NSSize(width: 1500, height: 72), to: path)
+        case "recordings":      // Recording Settings list rows of the record outputs (thumbnail of the last file)
+            let recs = engine.outputs.filter { $0.config.kind == .record }
+            return view(VStack(alignment: .leading, spacing: 6) {
+                            ForEach(recs) { OutputRow(output: $0) }
+                        }.padding(10).environmentObject(engine).frame(width: 380),
+                        size: NSSize(width: 380, height: CGFloat(max(1, recs.count)) * 64 + 20), to: path)
         case "encoding":
             var c = OutputConfig.defaultConfig(kind: .stream)
             c.proto = .srt; c.srtHost = "203.0.113.10"; c.cbr = true

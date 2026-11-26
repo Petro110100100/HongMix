@@ -383,7 +383,16 @@ final class OutputChannel: ObservableObject, Identifiable {
     @Published private(set) var state: Int32 = Int32(MC_STATE_IDLE)
     @Published private(set) var message: String = ""
     @Published private(set) var statsText: String = ""
-    @Published private(set) var lastFile: String = ""
+    @Published private(set) var lastFile: String = "" {
+        didSet {
+            guard !lastFile.isEmpty, recentFiles.last != lastFile else { return }
+            recentFiles.append(lastFile)
+            if recentFiles.count > 20 { recentFiles.removeFirst(recentFiles.count - 20) }
+        }
+    }
+    /// Files this record output wrote since launch, oldest first (last 20; split files included) —
+    /// listed in the recording entry's right-click menu.
+    @Published private(set) var recentFiles: [String] = []
     /// Latest encoder bitrate (not published — read by the health history every second).
     private(set) var lastKbps: Double = 0
     /// Broadcast delay currently held back (ms), from the encoder thread.

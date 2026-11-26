@@ -192,11 +192,16 @@ struct BusSourcesBar: View {
 struct OutputRow: View {
     @EnvironmentObject var engine: SwitcherEngine
     @ObservedObject var output: OutputChannel
+    @StateObject private var fileActions = RecordedFileActions()
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: output.config.kind.symbol)
-                .frame(width: 18)
+            if output.config.kind == .record {
+                RecordingThumbnail(path: output.lastFile, running: output.running, symbol: output.config.kind.symbol)
+            } else {
+                Image(systemName: output.config.kind.symbol)
+                    .frame(width: 18)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(output.config.name).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                 Text(output.message.isEmpty ? output.config.kind.label : output.message)
@@ -235,14 +240,17 @@ struct OutputRow: View {
         }
         .padding(.vertical, 3)
         .contextMenu {
+            RecordedFileMenuItems(output: output, actions: fileActions)
             Button(L("삭제"), role: .destructive) { engine.removeOutput(output) }
         }
+        .recordedFileActions(fileActions)
     }
 }
 
 struct OutputEditor: View {
     @EnvironmentObject var engine: SwitcherEngine
     @ObservedObject var output: OutputChannel
+    @StateObject private var fileActions = RecordedFileActions()
 
     var body: some View {
         Form {
@@ -310,8 +318,9 @@ struct OutputEditor: View {
             }
             if output.config.kind == .stream || output.config.kind == .record { encoderFields }
             if output.config.kind == .record, !output.lastFile.isEmpty {
-                Button(L("Finder에서 보기")) {
-                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: output.lastFile)])
+                HStack {
+                    Button(L("Finder에서 보기")) { fileActions.showInFinder(output.lastFile) }
+                    Button(L("훑어보기")) { fileActions.preview(output.lastFile, among: output.recentFiles) }
                 }
             }
             HStack {
@@ -326,6 +335,7 @@ struct OutputEditor: View {
         .formStyle(.grouped)
         .textFieldStyle(.roundedBorder)
         .disabled(output.running)
+        .recordedFileActions(fileActions)
         .overlay(alignment: .top) {
             if output.running {
                 Text(L("실행 중에는 설정을 바꿀 수 없습니다"))

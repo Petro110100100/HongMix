@@ -1,0 +1,53 @@
+# Fork-only CI for the recording-file-menu branch (not part of the upstream change): builds HongMix on GitHub's
+# Apple Silicon runner, runs Hong's checks plus the recording list test, and packs a DMG to try.
+name: Recording file menu CI
+
+on:
+  push:
+    branches: [recording-file-menu]
+  workflow_dispatch:
+
+jobs:
+  build-test:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "Toolchain (newest Xcode, HongMix needs the macOS 26 SDK)"
+        run: |
+          X=$(ls -d /Applications/Xcode_*.app | sort -V | tail -1); sudo xcode-select -s "$X"
+          sw_vers; uname -m; xcrun --show-sdk-path; swiftc --version
+
+      - name: Dependencies
+        run: brew install dylibbundler pkgconf srt dav1d opus libvpx openssl@3
+
+      - name: English UI check (scripts/check-i18n.py)
+        run: python3 -I scripts/check-i18n.py
+
+      - name: Build LGPL FFmpeg
+        run: ./scripts/build-ffmpeg-lgpl.sh > build-ffmpeg.log 2>&1 || { tail -80 build-ffmpeg.log; exit 1; }
+
+      - name: Build app and DMG (scripts/make-dmg.sh)
+        run: |
+          ./scripts/make-dmg.sh || { cat build/logs/errors.txt 2>/dev/null; tail -150 build/logs/cli-build.log 2>/dev/null; exit 1; }
+          ls -la build build/dist 2>/dev/null || true
+
+      - name: Recording list test (tests/recordingfiles/app-thumb-test.sh)
+        run: bash tests/recordingfiles/app-thumb-test.sh build/cli/HongMix.app
+
+      - name: Collect
+        if: always()
+        run: |
+          mkdir -p out/shots
+          cp "${TMPDIR:-/tmp}"/hm-recfiles/shots/*.png out/shots/ 2>/dev/null || true
+          cp "${TMPDIR:-/tmp}"/hm-recfiles/*.log out/ 2>/dev/null || true
+          cp build/logs/*.txt build/logs/*.log out/ 2>/dev/null || true
+          find build -maxdepth 2 -name '*.dmg' -exec cp {} out/ \;
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: HongMix-recording-file-menu
+          path: out/
+          if-no-files-found: ignore
