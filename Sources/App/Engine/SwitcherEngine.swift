@@ -1874,6 +1874,7 @@ final class SwitcherEngine: ObservableObject {
                         rect: rect)
     }
 
+    private var sldbgLast: UUID?
     private func renderTick(_ tick: Int64) {
         let fmt = renderFormat
         let now = CACurrentMediaTime()
@@ -1938,6 +1939,10 @@ final class SwitcherEngine: ObservableObject {
         }
         let pgm = find(st.programID)
         let pvw = find(st.previewID)
+        if st.programID != sldbgLast {   // SLDBG
+            FileHandle.standardError.write("SLDBG render tick=\(tick) pgm=\(pgm?.name ?? "nil") buf=\(pgm.map { layer($0).buffer.map { String(describing: Unmanaged.passUnretained($0).toOpaque()) } ?? "nil" } ?? "-")\n".data(using: .utf8)!)
+            sldbgLast = st.programID
+        }
 
         // Track what the program renderer actually consumed. Input arrival statistics alone
         // cannot tell a fresh frame from a repeated stale frame during a presentation hitch.
@@ -2111,6 +2116,7 @@ final class SwitcherEngine: ObservableObject {
             var start: Int64? = nil
             if p.stinger != nil { cause = "stinger" }
             else if p.transitionActive { cause = p.manualT != nil ? "tbar" : "transition"; start = sessionTransitionStart }
+            FileHandle.standardError.write("SLDBG observe tick=\(tick) cause=\(cause)\n".data(using: .utf8)!)
             sessionLog.ingest(SessionRecord(type: "program", frame: tick, input: st.programID?.uuidString,
                                             from: p.programID?.uuidString, cause: cause,
                                             transition: start != nil && p.manualT == nil ? p.transition.rawValue : nil,

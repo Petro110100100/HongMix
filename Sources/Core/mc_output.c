@@ -145,6 +145,7 @@ typedef struct osession_s {
        timestamps rebased by `v_off`. Audio is cut sample-exactly on the same instant: the old audio
        encoder gets the samples up to cut_a (last frame may be short) and is flushed, a fresh encoder
        starts the new file at pts 0, so each file has its own clean AAC priming. */
+    int dbg_n;
     int64_t v_off;            // video pts (encoder time base) where this file starts
     int64_t atl;              // audio timeline: samples taken from the FIFO (incl. dropped) since sync
     struct osession_s *prev;  // old file being finished after a split, or NULL
@@ -1297,6 +1298,11 @@ static int write_packets(mc_output *o, osession *s, AVCodecContext *enc, AVStrea
                 if (pkt->dts != AV_NOPTS_VALUE) pkt->dts -= dst->v_off;
             }
         }
+        if (enc == s->venc && s->dbg_n < 4) {   // SLDBG
+            fprintf(stderr, "SLDBG pkt out=%p pts=%lld dts=%lld base_tick=%lld start_tick=%lld\n", (void *)o,
+                    (long long)pkt->pts, (long long)pkt->dts, (long long)o->base_tick, (long long)o->cur_start_tick);
+            s->dbg_n++;
+        }
         st = dst_st;
         av_packet_rescale_ts(pkt, enc->time_base, st->time_base);
         pkt->stream_index = st->index;
@@ -1958,7 +1964,9 @@ void mc_output_push_pixelbuffer(mc_output *o, void *pixel_buffer, int64_t tick) 
     if (o->vq_count == VQ_SLOTS) {
         vq_drop_head(o);
         o->stats.frames_dropped++;
+        fprintf(stderr, "SLDBG drop out=%p tick=%lld\n", (void *)o, (long long)tick);
     }
+    if (tick - o->base_tick < 3) fprintf(stderr, "SLDBG push out=%p tick=%lld base=%lld\n", (void *)o, (long long)tick, (long long)o->base_tick);
     vslot *v = &o->vq[(o->vq_head + o->vq_count) % VQ_SLOTS];
     v->pb = (void *)CFRetain((CFTypeRef)pixel_buffer);
     v->tick = tick;

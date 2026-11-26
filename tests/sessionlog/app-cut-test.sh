@@ -39,7 +39,7 @@ for src in "testsrc2=size=1920x1080:rate=$RATE" "testsrc=size=1920x1080:rate=$RA
   # a big block jumps 37 px per frame, so neighbouring frames differ clearly even at 48x27
   "$FFMPEG" -hide_banner -v error -y -f lavfi -i "$src" -f lavfi -i "sine=frequency=$((200*i)):sample_rate=48000" \
     -f lavfi -i "color=white:size=200x480:rate=$RATE" -t 60 \
-    -filter_complex "[0:v][2:v]overlay=x='mod(n*37,1700)':y=300:shortest=1[v]" -map "[v]" -map 1:a \
+    -filter_complex "[0:v][2:v]overlay=x='mod(n*137,1700)':y=300:shortest=1[v]" -map "[v]" -map 1:a \
     -c:v libx264 -preset ultrafast -g 1 -pix_fmt yuv420p -c:a aac "$W/media/cam$i.mp4" || exit 1
 done
 
@@ -110,7 +110,7 @@ files = doc['files']
 pgm = [f for f in files if f['role'] == 'program']
 iso = {f['input']: f for f in files if f['role'] == 'iso'}
 check(len(pgm) >= 1 and len(iso) == 3, f"files: {len(pgm)} program, {len(iso)} ISO")
-SW, SH = 48, 27
+SW, SH = 96, 54
 def frames(path):
     """file frame index (by timestamp) -> small RGB picture"""
     raw = subprocess.run([FF, '-v', 'error', '-i', path, '-vf', f'scale={SW}:{SH}:flags=area,format=rgb24',
@@ -170,6 +170,13 @@ for f in [pgm[0]] + list(iso.values()):
     st = subprocess.run([FP, '-v', 'error', '-select_streams', 'v', '-show_entries', 'stream=start_time,nb_frames,r_frame_rate,avg_frame_rate:format=start_time',
                          '-of', 'compact', f['path']], capture_output=True, text=True).stdout.strip().replace('\n', ' ')
     print(f"    {os.path.basename(f['path'])}: firstFrame {f['firstFrame']} | {st}")
+for f in [pgm[0]] + list(iso.values()):
+    pk = subprocess.run([FP, '-v', 'error', '-select_streams', 'v', '-show_entries', 'packet=pts,dts,pts_time,flags:stream=time_base',
+                         '-read_intervals', '%+#4', '-of', 'compact', f['path']], capture_output=True, text=True).stdout.strip().replace('\n', ' ; ')
+    print(f"    {os.path.basename(f['path'])} packets: {pk}")
+    ks = sorted(I[f['input']].keys()) if f['role'] == 'iso' else sorted(P.keys())
+    print(f"      decoded idx {ks[0]}..{ks[-1]} n={len(ks)} gaps={[k for a, k in zip(ks, ks[1:]) if k != a + 1][:10]}")
+print("    SLDBG lines:"); os.system(f"grep SLDBG '{W}/app.log' | head -80")
 check(tested >= 5 and exact == tested, f"{exact} of {tested} cuts frame-exact against the program recording")
 # shots cover the session
 sh = doc['shots']
